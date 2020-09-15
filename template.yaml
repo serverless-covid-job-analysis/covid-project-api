@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Covid Project - app - Serverless. SAM Template for Covid Project - API
+
+
+Globals:
+  Function:
+    Timeout: 180
+    MemorySize: 1024
+Parameters:
+    REGION:
+      Description: 'Required. AWS Region'
+      Type: 'String'
+      Default: 'ap-south-1'
+    ENV:
+      Description: 'Required. Env name'
+      Type: 'String'
+      Default: 'dev'
+    CLIENTDATATABLE:
+      Description: 'Required. DynamoDB Table for Tenants Resources Data'
+      Type: 'String'
+      Default: 'covid_main_data'
+
+Resources:
+  APILambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+        Path: "/"
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - arn:aws:iam::aws:policy/AWSLambdaFullAccess
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            -
+              Action:
+                - sts:AssumeRole
+              Effect: Allow
+              Principal:
+                Service:
+                  - 'lambda.amazonaws.com'
+                  -  "edgelambda.amazonaws.com"
+        Policies:
+
+          -
+            PolicyName: LambdaDynamoDBPolicy
+            PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                    -
+                      Action:
+                          - "dynamodb:Get*"
+                          - "dynamodb:Describe*"
+                      Effect: Allow
+                      Resource: ['*']
+          -
+            PolicyName: LambdaFunctionRolePolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                -
+                  Action:
+                    - "cloudwatch:*"
+                    - "s3:Get*"
+                    - "kms:Decrypt"
+                  Effect: Allow
+                  Resource: ['*']
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title:
+            Ref: AWS::StackName
+        schemes:
+        - "https"
+        paths:
+          /:
+            x-amazon-apigateway-any-method:
+              produces:
+              - "application/json"
+              security:
+              - Authorizer: []
+              responses:
+                "200":
+                  description: "200 response"
+                  schema:
+                    $ref: "#/definitions/Empty"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BackendLambdaHandler.Arn}/invocations"
+                passthroughBehavior: "when_no_match"
+                httpMethod: "POST"
+                contentHandling: "CONVERT_TO_TEXT"
+                type: "aws_proxy"
+          /{proxy+}:
+            options:
+              consumes:
+              - "application/json"
+              produces:
+              - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  schema:
+                    $ref: "#/definitions/Empty"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
+            x-amazon-apigateway-any-method:
+              produces:
+              - "application/json"
+              parameters:
+              - name: "proxy"
+                in: "path"
+                required: true
+                type: "string"
+              responses: {}
+              security:
+              - Authorizer: []
+              - CognitoAuthorizer: []
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BackendLambdaHandler.Arn}:${ENV}/invocations"
+                passthroughBehavior: "when_no_match"
+                httpMethod: "POST"
+                contentHandling: "CONVERT_TO_TEXT"
+                type: "aws_proxy"
+        # securityDefinitions:
+        #   CognitoAuthorizer:
+        #     type: "apiKey"
+        #     name: "Authorization"
+        #     in: "header"
+        #     x-amazon-apigateway-authtype: "cognito_user_pools"
+        #     x-amazon-apigateway-authorizer:
+        #       providerARNs:
+        #       - !Ref COGNITOPOOLARN
+        #       type: "cognito_user_pools"
+      StageName: !Ref ENV
+      Variables:
+        LambdaFunctionName: !Ref BackendLambdaHandler
+        ENV: !Ref ENV
+
+  BackendLambdaHandler:
+    Type: AWS::Serverless::Function
+    Properties:
+
+      CodeUri: covid-project/
+      Handler: app.lambda_handler
+      Runtime: python3.8
+      Role: !GetAtt APILambdaRole.Arn
+      AutoPublishAlias: !Ref ENV
+      Events:
+          ProxyApiRoot:
+            Type: Api
+            Properties:
+              RestApiId: !Ref ApiGatewayApi
+              Path: /
+              Method: ANY
+          ProxyApiGreedy:
+            Type: Api
+            Properties:
+              RestApiId: !Ref ApiGatewayApi
+              Path: /{proxy+}
+              Method: ANY
+      Environment:
+            Variables:
+              REGION: !Ref REGION
+              CLIENTDATATABLE: !Ref CLIENTDATATABLE
+              ENV: !Ref ENV
+              
+Outputs:
+    Api:
+      Description: "API Gateway endpoint URL for Prod stage"
+      Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/ping/"
+
+    BackendFunction:
+      Description: "Lambda Function ARN"
+      Value: !GetAtt BackendLambdaHandler.Arn
+
+    BackendFunctionIamRole:
+      Description: "Implicit IAM Role created for Lithology Prediction function"
+      Value: !GetAtt APILambdaRole.Arn
+
