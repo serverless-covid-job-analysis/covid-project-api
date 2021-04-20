@@ -20,7 +20,7 @@ websocket-client==0.56.0
 Werkzeug==0.15.5
 whichcraft==0.6.0
 regex==2019.6.8
-pyyaml==5.1.2
+pyyaml==5.4
 boto3
 flask-apiblueprint
 python-jose
