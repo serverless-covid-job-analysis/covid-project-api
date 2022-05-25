@@ -26,5 +26,5 @@ flask-apiblueprint
 python-jose
 pytest
 pycrypto==2.6.1
-PyJWT==1.7.1
+PyJWT==2.4.0
 requests-toolbelt==0.9.1
